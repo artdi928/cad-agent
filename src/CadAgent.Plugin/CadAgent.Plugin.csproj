@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AutoCADDir Condition="'$(AutoCADDir)' == ''">$(AUTOCAD_2025_DIR)</AutoCADDir>
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\CadAgent.Protocol\CadAgent.Protocol.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Reference Include="AcCoreMgd"><HintPath>$(AutoCADDir)\AcCoreMgd.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="AcDbMgd"><HintPath>$(AutoCADDir)\AcDbMgd.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="AcMgd"><HintPath>$(AutoCADDir)\AcMgd.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+  <Target Name="ValidateAutoCADReferences" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(AutoCADDir)\AcMgd.dll')" Text="Set AutoCADDir or AUTOCAD_2025_DIR to the AutoCAD 2025 installation directory." />
+  </Target>
+</Project>

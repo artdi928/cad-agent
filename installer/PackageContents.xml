@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" AppVersion="0.1.0" Name="CadAgent" Description="Read-only AutoCAD 2025 bridge" Author="cad-agent contributors" ProductType="Application">
+  <Components Description="CadAgent B1 plugin">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD" SeriesMin="R25.0" SeriesMax="R25.0" />
+    <ComponentEntry AppName="CadAgent" Version="0.1.0" ModuleName="./Contents/CadAgent.Plugin.dll" LoadOnAutoCADStartup="True" />
+  </Components>
+</ApplicationPackage>
