@@ -1,5 +1,6 @@
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.Geometry;
 using CadAgent.Protocol;
 using AcApplication = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
@@ -7,55 +8,40 @@ namespace CadAgent.Plugin;
 
 internal sealed class CadDispatcher
 {
-    public Task<RpcResponse> DispatchAsync(RpcRequest request)
+    // Called only by PluginRuntime's AutoCAD Application.Idle handler.
+    public RpcResponse Dispatch(RpcRequest request)
     {
-        if (request.Version != ProtocolConstants.Version)
-            return Task.FromResult(RpcResponse.Failure(request.RequestId, "protocol_mismatch", "Unsupported protocol version."));
-        if (string.IsNullOrWhiteSpace(request.RequestId))
-            return Task.FromResult(RpcResponse.Failure("unknown", "invalid_request", "requestId is required."));
-        if (!ProtocolConstants.AllowedMethods.Contains(request.Method))
-            return Task.FromResult(RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available in the B1 read-only contract."));
-
-        var completion = new TaskCompletionSource<RpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            // ExecuteInApplicationContext is the explicit AutoCAD main-thread boundary.
-            AcApplication.DocumentManager.ExecuteInApplicationContext(_ =>
+            return request.Method switch
             {
-                try { completion.TrySetResult(DispatchOnAutoCadThread(request)); }
-                catch (Exception exception)
+                "system.ping" => RpcResponse.Success(request.RequestId, new
                 {
-                    completion.TrySetResult(RpcResponse.Failure(request.RequestId, "cad_error", exception.Message));
-                }
-            }, null);
+                    pong = true,
+                    protocolVersion = ProtocolConstants.Version,
+                    processId = Environment.ProcessId
+                }),
+                "cad.get_drawing_info" => WithDocument(request.RequestId, DrawingInfo),
+                "cad.list_layers" => WithDocument(request.RequestId, ListLayers),
+                "cad.list_blocks" => WithDocument(request.RequestId, ListBlocks),
+                _ => RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available.")
+            };
         }
         catch (Exception exception)
         {
-            completion.TrySetResult(RpcResponse.Failure(request.RequestId, "cad_context_unavailable", exception.Message));
+            PluginRuntime.RecordError(exception);
+            return RpcResponse.Failure(request.RequestId, "cad_error", exception.Message);
         }
-        return completion.Task;
     }
-
-    private static RpcResponse DispatchOnAutoCadThread(RpcRequest request) => request.Method switch
-    {
-        "system.ping" => RpcResponse.Success(request.RequestId, new
-        {
-            pong = true,
-            protocolVersion = ProtocolConstants.Version,
-            processId = Environment.ProcessId
-        }),
-        "cad.get_drawing_info" => WithDocument(request.RequestId, DrawingInfo),
-        "cad.list_layers" => WithDocument(request.RequestId, ListLayers),
-        "cad.list_blocks" => WithDocument(request.RequestId, ListBlocks),
-        _ => RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available.")
-    };
 
     private static RpcResponse WithDocument(string requestId, Func<Document, object> read)
     {
         var document = AcApplication.DocumentManager.MdiActiveDocument;
-        return document is null
-            ? RpcResponse.Failure(requestId, "no_active_document", "AutoCAD has no active document.")
-            : RpcResponse.Success(requestId, read(document));
+        if (document is null)
+            return RpcResponse.Failure(requestId, "no_active_document", "AutoCAD has no active document.");
+
+        using (document.LockDocument())
+            return RpcResponse.Success(requestId, read(document));
     }
 
     private static object DrawingInfo(Document document)
@@ -96,17 +82,45 @@ internal sealed class CadDispatcher
     {
         using var transaction = document.TransactionManager.StartOpenCloseTransaction();
         var table = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
-        return table.Cast<ObjectId>()
-            .Select(id => (BlockTableRecord)transaction.GetObject(id, OpenMode.ForRead))
-            .Select(block => new
+        var result = new List<BlockInstance>();
+
+        foreach (var space in table.Cast<ObjectId>()
+                     .Select(id => (BlockTableRecord)transaction.GetObject(id, OpenMode.ForRead))
+                     .Where(record => record.IsLayout))
+        {
+            var spaceName = string.Equals(space.Name, BlockTableRecord.ModelSpace, StringComparison.Ordinal)
+                ? "model"
+                : "paper";
+            foreach (var id in space)
             {
-                block.Name,
-                handle = block.Handle.ToString(),
-                isAnonymous = block.IsAnonymous,
-                isLayout = block.IsLayout,
-                isFromExternalReference = block.IsFromExternalReference
-            })
-            .OrderBy(block => block.Name, StringComparer.Ordinal)
-            .ToArray();
+                if (transaction.GetObject(id, OpenMode.ForRead) is not BlockReference block) continue;
+                result.Add(new BlockInstance(
+                    block.Handle.ToString(), EffectiveName(block, transaction), block.Layer, spaceName,
+                    new Position(block.Position.X, block.Position.Y, block.Position.Z),
+                    Attributes(block, transaction)));
+            }
+        }
+
+        return result.OrderBy(block => block.Handle, StringComparer.Ordinal).ToArray();
     }
+
+    private static string EffectiveName(BlockReference block, Transaction transaction)
+    {
+        var id = block.IsDynamicBlock ? block.DynamicBlockTableRecord : block.BlockTableRecord;
+        return ((BlockTableRecord)transaction.GetObject(id, OpenMode.ForRead)).Name;
+    }
+
+    private static SortedDictionary<string, string> Attributes(BlockReference block, Transaction transaction)
+    {
+        var attributes = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (ObjectId id in block.AttributeCollection)
+            if (transaction.GetObject(id, OpenMode.ForRead) is AttributeReference attribute)
+                attributes[attribute.Tag] = attribute.TextString;
+        return attributes;
+    }
+
+    private sealed record BlockInstance(
+        string Handle, string Name, string Layer, string Space, Position Position,
+        SortedDictionary<string, string> Attributes);
+    private sealed record Position(double X, double Y, double Z);
 }

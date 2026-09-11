@@ -12,7 +12,7 @@ Upstream snapshots reviewed on 2026-09-11:
 | Named Pipe transport | Multi-session server | `CurrentUserOnly`, one client | Small B1 endpoint | ADAPT both |
 | Framing | 4-byte LE length + UTF-8 JSON, 16 MiB | Same, 8 MiB | Reduce bound to 1 MiB | ADAPT toolbank |
 | DTO/protocol | Large tool envelope and handshake | Native RPC DTOs | Four-method B1 contract | BUILD |
-| Main-thread dispatch | Captured `SynchronizationContext`; unsafe inline fallback if null | `ExecuteInApplicationContext` | No | REUSE secondary pattern |
+| Main-thread dispatch | Captured `SynchronizationContext`; unsafe inline fallback if null | `ExecuteInApplicationContext` failed in observed runtime | Bounded queue + `Application.Idle` | BUILD minimal pump |
 | `DocumentLock` | Used for writes, not reads | Used for mutations | B1 has no mutations | SKIP |
 | Transactions | Read/write helpers | Native transactions | Read-only open/close transactions | ADAPT |
 | Active document | `MdiActiveDocument` + structured error | Registry/fencing | Single active-document read | ADAPT |
@@ -31,3 +31,9 @@ Security note: `PipeOptions.CurrentUserOnly` is taken from the secondary
 reference. B1 does not add a token because the pipe is local/current-user and
 the allowlist is read-only. Add authentication only if the boundary becomes
 cross-user, remote, privileged, or mutating.
+
+R1 runtime evidence showed that calling `Application.DocumentManager` from the
+pipe worker before `ExecuteInApplicationContext` still crossed the AutoCAD-owned
+thread boundary. The remediation therefore retains both upstream transports but
+uses an AutoCAD `Application.Idle` event as the only consumer of a bounded,
+AutoCAD-independent request queue.

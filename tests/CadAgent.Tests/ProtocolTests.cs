@@ -62,6 +62,62 @@ public sealed class ProtocolTests
     }
 
     [TestMethod]
+    public async Task RequestPumpEnqueuesAndCompletesCorrelatedRequest()
+    {
+        var pump = new CadRequestPump();
+        var request = new RpcRequest(1, "queued-1", "system.ping");
+        var completion = pump.Enqueue(request, CancellationToken.None);
+        Assert.AreEqual(1, pump.PendingCount);
+        Assert.AreEqual(1, pump.Drain(1, item => RpcResponse.Success(item.RequestId, new { pong = true })));
+        var response = await completion;
+        Assert.IsTrue(response.Ok);
+        Assert.AreEqual(request.RequestId, response.RequestId);
+        Assert.AreEqual(0, pump.PendingCount);
+    }
+
+    [TestMethod]
+    public async Task RequestPumpRejectsOverflow()
+    {
+        var pump = new CadRequestPump(capacity: 1);
+        _ = pump.Enqueue(new RpcRequest(1, "first", "system.ping"), CancellationToken.None);
+        var rejected = await pump.Enqueue(new RpcRequest(1, "second", "system.ping"), CancellationToken.None);
+        Assert.IsFalse(rejected.Ok);
+        Assert.AreEqual("server_busy", rejected.Error?.Code);
+    }
+
+    [TestMethod]
+    public async Task RequestPumpCancellationIsStructured()
+    {
+        var pump = new CadRequestPump();
+        using var cancellation = new CancellationTokenSource();
+        var completion = pump.Enqueue(new RpcRequest(1, "cancelled", "system.ping"), cancellation.Token);
+        cancellation.Cancel();
+        Assert.AreEqual("request_timeout", (await completion).Error?.Code);
+        pump.Drain(1, _ => throw new AssertFailedException("Cancelled request must not dispatch."));
+    }
+
+    [TestMethod]
+    public async Task RequestPumpShutdownFailsPendingAndNewRequests()
+    {
+        var pump = new CadRequestPump();
+        var pending = pump.Enqueue(new RpcRequest(1, "pending", "system.ping"), CancellationToken.None);
+        pump.Stop();
+        Assert.AreEqual("plugin_stopping", (await pending).Error?.Code);
+        var afterStop = await pump.Enqueue(new RpcRequest(1, "late", "system.ping"), CancellationToken.None);
+        Assert.AreEqual("plugin_stopping", afterStop.Error?.Code);
+        Assert.AreEqual(0, pump.PendingCount);
+    }
+
+    [TestMethod]
+    public void ProtocolValidationRejectsUnknownMethodAndVersion()
+    {
+        Assert.AreEqual("unknown_method",
+            ProtocolValidation.Validate(new RpcRequest(1, "r", "cad.create"))?.Error?.Code);
+        Assert.AreEqual("protocol_mismatch",
+            ProtocolValidation.Validate(new RpcRequest(2, "r", "system.ping"))?.Error?.Code);
+    }
+
+    [TestMethod]
     public async Task ClientCorrelatesResponseAndReconnects()
     {
         var pipeName = $"cad-agent-test-{Guid.NewGuid():N}";

@@ -25,6 +25,109 @@ public sealed record RpcResponse(int Version, string RequestId, bool Ok, JsonEle
 }
 public sealed record RpcError(string Code, string Message);
 
+public static class ProtocolValidation
+{
+    public static RpcResponse? Validate(RpcRequest request)
+    {
+        if (request.Version != ProtocolConstants.Version)
+            return RpcResponse.Failure(request.RequestId ?? "unknown", "protocol_mismatch", "Unsupported protocol version.");
+        if (string.IsNullOrWhiteSpace(request.RequestId) || string.IsNullOrWhiteSpace(request.Method))
+            return RpcResponse.Failure("unknown", "invalid_request", "requestId and method are required.");
+        return ProtocolConstants.AllowedMethods.Contains(request.Method)
+            ? null
+            : RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available in the B1 read-only contract.");
+    }
+}
+
+public sealed class CadRequestPump
+{
+    private readonly object _sync = new();
+    private readonly Queue<PendingRequest> _queue = new();
+    private readonly int _capacity;
+    private bool _stopping;
+
+    public CadRequestPump(int capacity = 32)
+    {
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        _capacity = capacity;
+    }
+
+    public int PendingCount { get { lock (_sync) return _queue.Count; } }
+
+    public Task<RpcResponse> Enqueue(RpcRequest request, CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_stopping)
+                return Task.FromResult(RpcResponse.Failure(request.RequestId, "plugin_stopping", "Plugin is stopping."));
+            if (_queue.Count >= _capacity)
+                return Task.FromResult(RpcResponse.Failure(request.RequestId, "server_busy", "Request queue is full."));
+            var pending = new PendingRequest(request, cancellationToken);
+            _queue.Enqueue(pending);
+            return pending.Task;
+        }
+    }
+
+    public int Drain(int maximum, Func<RpcRequest, RpcResponse> dispatch)
+    {
+        if (maximum <= 0) throw new ArgumentOutOfRangeException(nameof(maximum));
+        var handled = 0;
+        while (handled < maximum)
+        {
+            PendingRequest pending;
+            lock (_sync)
+            {
+                if (_queue.Count == 0) break;
+                pending = _queue.Dequeue();
+            }
+            if (!pending.IsCompleted)
+            {
+                try { pending.Complete(dispatch(pending.Request)); }
+                catch { pending.Complete(RpcResponse.Failure(pending.Request.RequestId, "internal_error", "Request failed internally.")); }
+            }
+            handled++;
+        }
+        return handled;
+    }
+
+    public void Stop()
+    {
+        PendingRequest[] pending;
+        lock (_sync)
+        {
+            if (_stopping) return;
+            _stopping = true;
+            pending = _queue.ToArray();
+            _queue.Clear();
+        }
+        foreach (var item in pending)
+            item.Complete(RpcResponse.Failure(item.Request.RequestId, "plugin_stopping", "Plugin is stopping."));
+    }
+
+    private sealed class PendingRequest
+    {
+        private readonly TaskCompletionSource<RpcResponse> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private CancellationTokenRegistration _registration;
+
+        public PendingRequest(RpcRequest request, CancellationToken cancellationToken)
+        {
+            Request = request;
+            _registration = cancellationToken.Register(() => Complete(
+                RpcResponse.Failure(request.RequestId, "request_timeout", "Request was cancelled before execution.")));
+            if (_completion.Task.IsCompleted) _registration.Dispose();
+        }
+
+        public RpcRequest Request { get; }
+        public Task<RpcResponse> Task => _completion.Task;
+        public bool IsCompleted => _completion.Task.IsCompleted;
+        public void Complete(RpcResponse response)
+        {
+            if (_completion.TrySetResult(response)) _registration.Dispose();
+        }
+    }
+}
+
 public static class JsonDefaults
 {
     public static readonly JsonSerializerOptions Options = new()

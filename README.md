@@ -6,9 +6,9 @@ It is not an MCP server yet and has no AI/provider dependency.
 ```text
 CadAgent.Bridge (.NET 8 process)
   -> current-user named pipe, length-prefixed versioned JSON
-  -> CadAgent.Plugin (.NET 8, in AutoCAD 2025)
-  -> ExecuteInApplicationContext
-  -> active drawing, read-only transactions
+  -> bounded queue (32 pending requests)
+  -> AutoCAD Application.Idle pump (up to 4 requests per callback)
+  -> active drawing, short-lived DocumentLock, read-only transactions
 ```
 
 The public B1 method allowlist is exactly:
@@ -20,7 +20,9 @@ The public B1 method allowlist is exactly:
 
 No create/delete/modify/save/command/LISP/C#/shell method exists. AutoCAD
 `ObjectId` values never cross the boundary; stable hexadecimal handles are
-returned for layers and block definitions.
+returned for layers and inserted block instances. `cad.list_blocks` scans
+top-level `BlockReference` objects in ModelSpace and PaperSpace and returns
+handle, effective name, layer, space, insertion position and attributes.
 
 ## Requirements and build
 
@@ -61,6 +63,10 @@ Each command must return JSON with `ok:true` and the same `requestId` as the
 request. Disconnect and repeat `system.ping` to verify reconnect. Keep
 AutoCAD `SECURELOAD` enabled; production deployment should Authenticode-sign
 the plugin according to the organization's certificate policy.
+
+`cad.list_blocks` intentionally does not recurse into nested block definitions
+or traverse Xrefs. Dynamic references use their dynamic block table record name;
+anonymous non-dynamic references retain their actual definition name.
 
 ## Reuse and limitations
 
