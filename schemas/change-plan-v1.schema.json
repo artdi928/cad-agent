@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/artdi928/cad-agent/main/schemas/change-plan-v1.schema.json",
+  "title": "CadAgentChangePlanV1",
+  "description": "Deterministic change plan for safe allowlisted AutoCAD mutations (v1: DBText, BlockReference attributes).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "drawing", "operations"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Contract version. Must be 1 for change-plan-v1."
+    },
+    "drawing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fullPath"],
+      "properties": {
+        "fullPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Normalized full path of the authoritative target saved DWG file."
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId", "kind", "target", "precondition", "value"],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique identifier of the operation within the change plan."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["set_dbtext", "set_block_attribute"],
+            "description": "Allowlisted mutation kind: set_dbtext (TextString) or set_block_attribute (AttributeReference.TextString)."
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["handle"],
+            "properties": {
+              "handle": {
+                "type": "string",
+                "pattern": "^[0-9A-Fa-f]+$",
+                "description": "Hexadecimal AutoCAD entity handle."
+              },
+              "attributeTag": {
+                "type": "string",
+                "description": "Block attribute tag. Required for set_block_attribute; must be omitted for set_dbtext."
+              }
+            }
+          },
+          "precondition": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["equals"],
+            "properties": {
+              "equals": {
+                "type": "string",
+                "description": "Exact ordinal string value expected before applying the mutation."
+              }
+            }
+          },
+          "value": {
+            "type": "string",
+            "description": "Exact string value to set upon successful precondition verification."
+          }
+        }
+      }
+    }
+  }
+}

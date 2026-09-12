@@ -24,6 +24,9 @@ internal sealed class CadDispatcher
                 "cad.get_drawing_info" => WithDocument(request.RequestId, DrawingInfo),
                 "cad.list_layers" => WithDocument(request.RequestId, ListLayers),
                 "cad.list_blocks" => WithDocument(request.RequestId, ListBlocks),
+                "cad.list_entities" => WithDocument(request.RequestId, doc => EntityInspector.ListEntities(doc, ParseEntityTypes(request.Parameters))),
+                "cad.validate_change_plan" => PlanExecutor.ValidatePlan(request),
+                "cad.apply_change_plan" => PlanExecutor.ApplyPlan(request),
                 _ => RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available.")
             };
         }
@@ -32,6 +35,29 @@ internal sealed class CadDispatcher
             PluginRuntime.RecordError(exception);
             return RpcResponse.Failure(request.RequestId, "cad_error", exception.Message);
         }
+    }
+
+    private static IReadOnlyList<string>? ParseEntityTypes(System.Text.Json.JsonElement? parameters)
+    {
+        if (parameters is null) return null;
+        try
+        {
+            if (parameters.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                parameters.Value.TryGetProperty("types", out var typesProp) &&
+                typesProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                return typesProp.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToArray();
+            }
+            if (parameters.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                return parameters.Value.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => !string.IsNullOrEmpty(s)).ToArray();
+            }
+        }
+        catch
+        {
+            // Fall back to default types if parameter parsing fails
+        }
+        return null;
     }
 
     private static RpcResponse WithDocument(string requestId, Func<Document, object> read)
@@ -88,7 +114,7 @@ internal sealed class CadDispatcher
                      .Select(id => (BlockTableRecord)transaction.GetObject(id, OpenMode.ForRead))
                      .Where(record => record.IsLayout))
         {
-            var spaceName = string.Equals(space.Name, BlockTableRecord.ModelSpace, StringComparison.Ordinal)
+            var spaceName = string.Equals(space.Name, BlockTableRecord.ModelSpace, StringComparison.OrdinalIgnoreCase)
                 ? "model"
                 : "paper";
             foreach (var id in space)

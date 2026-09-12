@@ -5,3 +5,10 @@ obj/
 *.suo
 artifacts/
 *.bundle/
+.local-data/
+.agent/current_stage.json
+.agent/reviews/
+.agent/logs/
+.agent/handoffs/
+.agent/evidence/
+.tmp/

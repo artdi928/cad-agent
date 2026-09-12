@@ -11,18 +11,26 @@ CadAgent.Bridge (.NET 8 process)
   -> active drawing, short-lived DocumentLock, read-only transactions
 ```
 
-The public B1 method allowlist is exactly:
+The public method allowlist is:
 
 - `system.ping`
 - `cad.get_drawing_info`
 - `cad.list_layers`
 - `cad.list_blocks`
+- `cad.list_entities` (generic inspection: DBText, MText, MLeader, BlockReference)
+- `cad.validate_change_plan` (read-only dry run for change plans)
+- `cad.apply_change_plan` (atomic allowlisted mutation with postcondition-before-commit)
 
-No create/delete/modify/save/command/LISP/C#/shell method exists. AutoCAD
-`ObjectId` values never cross the boundary; stable hexadecimal handles are
-returned for layers and inserted block instances. `cad.list_blocks` scans
-top-level `BlockReference` objects in ModelSpace and PaperSpace and returns
-handle, effective name, layer, space, insertion position and attributes.
+AutoCAD `ObjectId` values never cross the boundary; stable hexadecimal handles are
+returned.
+
+### Safe mutation V1 invariants:
+- **Allowlisted mutations only**: `set_dbtext` (`DBText.TextString`) and `set_block_attribute` (`AttributeReference.TextString`).
+- **Inspect-only in V1**: `MText` and `MLeader` (formatting and content-type risk deferred to V2).
+- **Exact preconditions**: Required string comparison; missing attribute tag fails closed.
+- **Atomic flow**: Full preflight read -> DocumentLock -> Single transaction -> Apply -> Verify postcondition inside transaction -> Commit/Abort.
+- **Zero auto-save**: The plugin never executes Save, SaveAs, or command-line save. After apply, the DWG is marked modified (`*`) and the operator decides when to save.
+
 
 ## Requirements and build
 

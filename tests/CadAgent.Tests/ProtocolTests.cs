@@ -40,16 +40,25 @@ public sealed class ProtocolTests
     }
 
     [TestMethod]
-    public void ContractContainsOnlyB1Allowlist()
+    public void ContractContainsOnlyAllowlistedMethods()
     {
         CollectionAssert.AreEquivalent(new[]
         {
-            "system.ping", "cad.get_drawing_info", "cad.list_layers", "cad.list_blocks"
+            "system.ping",
+            "cad.get_drawing_info",
+            "cad.list_layers",
+            "cad.list_blocks",
+            "cad.list_entities",
+            "cad.validate_change_plan",
+            "cad.apply_change_plan"
         }, ProtocolConstants.AllowedMethods.ToArray());
         Assert.IsFalse(ProtocolConstants.AllowedMethods.Any(method =>
             method.Contains("create", StringComparison.OrdinalIgnoreCase) ||
             method.Contains("delete", StringComparison.OrdinalIgnoreCase) ||
-            method.Contains("execute", StringComparison.OrdinalIgnoreCase)));
+            method.Contains("execute", StringComparison.OrdinalIgnoreCase) ||
+            method.Contains("lisp", StringComparison.OrdinalIgnoreCase) ||
+            method.Contains("save", StringComparison.OrdinalIgnoreCase) ||
+            method.Contains("shell", StringComparison.OrdinalIgnoreCase)));
     }
 
     [TestMethod]

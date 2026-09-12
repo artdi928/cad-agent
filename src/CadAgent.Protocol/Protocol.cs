@@ -11,8 +11,31 @@ public static class ProtocolConstants
     public const string DefaultPipeName = "cad-agent-b1";
     public static readonly IReadOnlySet<string> AllowedMethods = new HashSet<string>(StringComparer.Ordinal)
     {
-        "system.ping", "cad.get_drawing_info", "cad.list_layers", "cad.list_blocks"
+        "system.ping",
+        "cad.get_drawing_info",
+        "cad.list_layers",
+        "cad.list_blocks",
+        "cad.list_entities",
+        "cad.validate_change_plan",
+        "cad.apply_change_plan"
     };
+}
+
+public static class ErrorCodes
+{
+    public const string InvalidChangePlan = "INVALID_CHANGE_PLAN";
+    public const string UnsavedDocument = "UNSAVED_DOCUMENT";
+    public const string WrongDocument = "WRONG_DOCUMENT";
+    public const string TargetNotFound = "TARGET_NOT_FOUND";
+    public const string EntityTypeMismatch = "ENTITY_TYPE_MISMATCH";
+    public const string UnsupportedOperation = "UNSUPPORTED_OPERATION";
+    public const string UnsupportedField = "UNSUPPORTED_FIELD";
+    public const string PreconditionFailed = "PRECONDITION_FAILED";
+    public const string DuplicateTarget = "DUPLICATE_TARGET";
+    public const string CadBusy = "CAD_BUSY";
+    public const string CadError = "CAD_ERROR";
+    public const string PostconditionFailed = "POSTCONDITION_FAILED";
+    public const string AtomicityViolation = "ATOMICITY_VIOLATION";
 }
 
 public sealed record RpcRequest(int Version, string RequestId, string Method, JsonElement? Parameters = null);
@@ -20,8 +43,8 @@ public sealed record RpcResponse(int Version, string RequestId, bool Ok, JsonEle
 {
     public static RpcResponse Success(string id, object value) =>
         new(ProtocolConstants.Version, id, true, JsonSerializer.SerializeToElement(value, JsonDefaults.Options));
-    public static RpcResponse Failure(string id, string code, string message) =>
-        new(ProtocolConstants.Version, id, false, null, new RpcError(code, message));
+    public static RpcResponse Failure(string id, string code, string message, object? result = null) =>
+        new(ProtocolConstants.Version, id, false, result is null ? null : JsonSerializer.SerializeToElement(result, JsonDefaults.Options), new RpcError(code, message));
 }
 public sealed record RpcError(string Code, string Message);
 
@@ -35,7 +58,7 @@ public static class ProtocolValidation
             return RpcResponse.Failure("unknown", "invalid_request", "requestId and method are required.");
         return ProtocolConstants.AllowedMethods.Contains(request.Method)
             ? null
-            : RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available in the B1 read-only contract.");
+            : RpcResponse.Failure(request.RequestId, "unknown_method", "Method is not available in the active contract.");
     }
 }
 
@@ -135,7 +158,8 @@ public static class JsonDefaults
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = false,
         WriteIndented = false,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 }
 

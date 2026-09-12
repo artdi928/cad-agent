@@ -1,0 +1,6 @@
+{
+  "bootstrap_schema_version": 1,
+  "framework": "engineering-agent-workflow",
+  "profile": "generic",
+  "project_id": "cad-agent"
+}
