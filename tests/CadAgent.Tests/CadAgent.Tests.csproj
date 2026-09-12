@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CadAgent.Protocol\CadAgent.Protocol.csproj" />
     <ProjectReference Include="..\..\src\CadAgent.Bridge\CadAgent.Bridge.csproj" />
+    <ProjectReference Include="..\..\src\CadAgent.Mcp\CadAgent.Mcp.csproj" />
   </ItemGroup>
 </Project>

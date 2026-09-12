@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadAgent.Plugin", "src\CadA
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadAgent.Tests", "tests\CadAgent.Tests\CadAgent.Tests.csproj", "{DE32F5CF-B655-4434-BF84-1FD5C5194104}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CadAgent.Mcp", "src\CadAgent.Mcp\CadAgent.Mcp.csproj", "{C1D549E2-7065-42E1-B5B3-73CEF8295105}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,5 +35,9 @@ Global
 		{DE32F5CF-B655-4434-BF84-1FD5C5194104}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DE32F5CF-B655-4434-BF84-1FD5C5194104}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DE32F5CF-B655-4434-BF84-1FD5C5194104}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C1D549E2-7065-42E1-B5B3-73CEF8295105}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C1D549E2-7065-42E1-B5B3-73CEF8295105}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C1D549E2-7065-42E1-B5B3-73CEF8295105}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C1D549E2-7065-42E1-B5B3-73CEF8295105}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

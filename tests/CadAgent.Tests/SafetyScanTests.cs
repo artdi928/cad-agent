@@ -92,6 +92,43 @@ public sealed class SafetyScanTests
             "MText and MLeader must remain inspect-only; mutation in v1 is forbidden.");
     }
 
+    [TestMethod]
+    public void McpProject_DoesNotReferenceAutodeskAssemblies()
+    {
+        var repoRoot = GetRepoRoot();
+        var mcpProjFile = Path.Combine(repoRoot, "src", "CadAgent.Mcp", "CadAgent.Mcp.csproj");
+        Assert.IsTrue(File.Exists(mcpProjFile), "CadAgent.Mcp.csproj must exist.");
+
+        var projContent = File.ReadAllText(mcpProjFile);
+        Assert.IsFalse(projContent.Contains("Autodesk", StringComparison.OrdinalIgnoreCase),
+            "CadAgent.Mcp must not reference Autodesk assemblies.");
+        Assert.IsFalse(projContent.Contains("acdbmgd", StringComparison.OrdinalIgnoreCase) ||
+                       projContent.Contains("accoremgd", StringComparison.OrdinalIgnoreCase) ||
+                       projContent.Contains("acmgd", StringComparison.OrdinalIgnoreCase),
+            "CadAgent.Mcp must not reference AutoCAD native managed DLLs.");
+    }
+
+    [TestMethod]
+    public void McpProject_DoesNotContainDirectMutationOrAutoCADWriteLogic()
+    {
+        var repoRoot = GetRepoRoot();
+        var mcpDir = Path.Combine(repoRoot, "src", "CadAgent.Mcp");
+        Assert.IsTrue(Directory.Exists(mcpDir), "CadAgent.Mcp directory must exist.");
+
+        var csFiles = Directory.GetFiles(mcpDir, "*.cs", SearchOption.AllDirectories);
+        string[] forbiddenCadTokens = ["OpenMode.ForWrite", "ForWrite", "StartTransaction", "GetObject", "TransactionManager", "Commit()"];
+
+        foreach (var file in csFiles)
+        {
+            var text = File.ReadAllText(file);
+            foreach (var token in forbiddenCadTokens)
+            {
+                Assert.IsFalse(text.Contains(token, StringComparison.OrdinalIgnoreCase),
+                    $"CadAgent.Mcp file '{Path.GetFileName(file)}' must not contain direct CAD write/transaction token '{token}'. MCP must delegate all mutations to bridge.");
+            }
+        }
+    }
+
     private static string GetRepoRoot()
     {
         var baseDir = AppContext.BaseDirectory;

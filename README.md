@@ -1,7 +1,7 @@
 # cad-agent
 
-Minimal read-only boundary between AutoCAD 2025 and a local .NET 8 bridge.
-It is not an MCP server yet and has no AI/provider dependency.
+Deterministic bridge between AutoCAD 2025 and AI agents via Model Context Protocol (MCP) or local .NET CLI.
+The LLM stays outside AutoCAD; all CAD mutations are deterministic, allowlisted, preconditioned, and verified inside an atomic transaction before commit.
 
 ```text
 CadAgent.Bridge (.NET 8 process)
@@ -75,6 +75,80 @@ the plugin according to the organization's certificate policy.
 `cad.list_blocks` intentionally does not recurse into nested block definitions
 or traverse Xrefs. Dynamic references use their dynamic block table record name;
 anonymous non-dynamic references retain their actual definition name.
+
+## Connect an AI agent to AutoCAD
+
+`CadAgent.Mcp` exposes a stdio Model Context Protocol (MCP) server that external AI clients (Claude Desktop, Cursor, Antigravity, or custom agent runtimes) can use to inspect drawings and execute safe change plans.
+
+### MCP Tools
+
+| Tool | Description |
+|---|---|
+| `cad_ping` | Checks AutoCAD connection and returns process/session info |
+| `cad_get_drawing_info` | Authoritative active drawing info (full path, dirty state, units, active layer) |
+| `cad_list_layers` | Lists drawing layers |
+| `cad_list_blocks` | Lists block definitions and attributes |
+| `cad_list_entities` | Inspects drawing entities (`DBText`, `MText`, `MLeader`, `BlockReference`) |
+| `cad_validate_change_plan` | Preflight dry-run validation of structured change plans |
+| `cad_apply_change_plan` | Atomic change-plan execution with postcondition verification |
+
+### Setup
+
+1. Launch AutoCAD 2025 and ensure `CadAgent.Plugin` is loaded (named pipe `cad-agent-b1` active).
+2. Open target drawing (e.g. `C:\Temp\cad-agent-test.dwg`).
+3. Configure your AI agent to launch the MCP server.
+
+### Example MCP client configuration
+
+#### Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "cad-agent": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\.projects\\cad-agent\\start-cad-agent-mcp.ps1"
+      ]
+    }
+  }
+}
+```
+
+Or directly via `dotnet`:
+
+```json
+{
+  "mcpServers": {
+    "cad-agent": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "C:\\.projects\\cad-agent\\src\\CadAgent.Mcp",
+        "-c",
+        "Release",
+        "--no-build"
+      ]
+    }
+  }
+}
+```
+
+### Required Agent Workflow
+
+For any drawing modification instruction:
+1. **Authoritative read**: Call `cad_get_drawing_info` to verify active drawing identity and status.
+2. **Inspect**: Call `cad_list_entities` to discover candidate handles and current values.
+3. **Construct exact plan**: Build a `version: 1` change plan with explicit handles, exact `precondition: { "equals": "..." }`, and requested `value`.
+4. **Validate**: Call `cad_validate_change_plan`. If validation fails, report failure and halt.
+5. **Apply**: Call `cad_apply_change_plan` only after validation succeeds.
+6. **Fresh readback**: Call `cad_list_entities` to re-read affected entities.
+7. **Verify & Report**: Compare readback against requested values and report changed/unchanged entities.
 
 ## Reuse and limitations
 
