@@ -37,3 +37,17 @@ pipe worker before `ExecuteInApplicationContext` still crossed the AutoCAD-owned
 thread boundary. The remediation therefore retains both upstream transports but
 uses an AutoCAD `Application.Idle` event as the only consumer of a bounded,
 AutoCAD-independent request queue.
+
+# Universal 2D geometry primitives v1 reuse review
+
+Reviewed for stage `stage-cad-agent-universal-2d-geometry-primitives-v1`:
+
+| Area | Upstream / Existing State | Decision | Rationale |
+|---|---|---|---|
+| Plan schema | Existing `ChangePlan` v1 with property mutations | ADAPT | Retain `version: 1`, `drawing`, `operations`. Extend `PlanOperation` with nullable geometry fields. 100% backward compatible. |
+| Primitive DTOs | Upstream uses ad-hoc command parameters or untyped dictionaries | BUILD / ADAPT | Typed `PointDto`, `ScaleDto` with strict `double.IsFinite` verification and deterministic WCS units. |
+| Transaction model | Existing `PlanExecutor` single-transaction with preflight dry-run & postcondition verification | ADAPT | ModelSpace entity creations execute inside the single transaction. Verifies postconditions before commit; on abort, fresh open-close transaction confirms created handles do not exist. |
+| Entity creation | Upstream creates entities in command handlers | ADAPT | Dedicated deterministic `EntityCreator` in `CadAgent.Plugin` using standard `Autodesk.AutoCAD.DatabaseServices` primitives (`Line`, `Polyline`, `Circle`, `Arc`, `DBText`, `MText`, `BlockReference`). Zero COM/LISP/command string execution. |
+| Readback representation | `cad_list_entities` returns `EntityDto` | ADAPT | Extend `EntityDto` and `EntityInspector` to return defining geometry for `Line`, `Polyline`, `Circle`, `Arc`, `DBText`, `MText`, `BlockReference`. |
+| MCP mapping | 7 existing tools | KEEP | Retain existing tools. No tool-per-primitive explosion. `cad_validate_change_plan` and `cad_apply_change_plan` carry the typed primitives. |
+| Modifications | `move_entity`, `rotate_entity`, `delete_entity`, `scale_entity` | DEFERRED TO v1.1 | Kept out of scope for v1 per Ponytail Lite baseline and prompt to ensure atomic creation rollback verification remains simple and robust. |

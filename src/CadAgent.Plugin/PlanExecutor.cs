@@ -81,6 +81,12 @@ internal static class PlanExecutor
             {
                 foreach (var op in plan.Operations)
                 {
+                    if (op.Target is null)
+                    {
+                        preApplySnapshots.Add(new TargetSnapshot(op.OperationId, op.Kind, "", null, ""));
+                        continue;
+                    }
+
                     TryParseHandle(op.Target.Handle, out var h);
                     document.Database.TryGetObjectId(h, out var objId);
                     if (string.Equals(op.Kind, ChangePlanValidator.KindSetDbText, StringComparison.Ordinal))
@@ -103,101 +109,160 @@ internal static class PlanExecutor
                         }
                         preApplySnapshots.Add(new TargetSnapshot(op.OperationId, op.Kind, op.Target.Handle, op.Target.AttributeTag, origVal));
                     }
+                    else
+                    {
+                        preApplySnapshots.Add(new TargetSnapshot(op.OperationId, op.Kind, "", null, ""));
+                    }
                 }
             }
 
             bool writeAttempted = false;
             var touchedSnapshots = new List<TargetSnapshot>();
+            var createdHandles = new List<string>();
             var appliedOperations = new List<OperationApplyResult>();
 
             // 10. Start single mutation transaction
             using var transaction = document.TransactionManager.StartTransaction();
             try
             {
+                var blockTable = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+                var modelSpace = (BlockTableRecord)transaction.GetObject(blockTable[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
                 // 11-12. Open exact validated targets ForWrite and apply allowlisted changes
                 for (int i = 0; i < plan.Operations.Count; i++)
                 {
                     var op = plan.Operations[i];
                     var snapshot = preApplySnapshots[i];
 
-                    if (!TryParseHandle(op.Target.Handle, out var handle) ||
-                        !document.Database.TryGetObjectId(handle, out var objectId))
+                    if (op.Target is not null)
                     {
-                        throw new PlanExecutionException(ErrorCodes.TargetNotFound,
-                            $"Target handle '{op.Target.Handle}' not found during write phase.");
-                    }
-
-                    if (string.Equals(op.Kind, ChangePlanValidator.KindSetDbText, StringComparison.Ordinal))
-                    {
-                        var dbText = (DBText)transaction.GetObject(objectId, OpenMode.ForWrite);
-                        var previousValue = dbText.TextString;
-
-                        writeAttempted = true;
-                        touchedSnapshots.Add(snapshot);
-
-                        dbText.TextString = op.Value;
-
-                        // 13. Re-read actual value INSIDE THE SAME TRANSACTION
-                        var actualValue = dbText.TextString;
-
-                        // 14. Validate postcondition: actual == requested value (exact ordinal string)
-#if DEBUG
-                        var forcedFault = string.Equals(op.FaultInjection, "force_postcondition_mismatch", StringComparison.Ordinal);
-#else
-                        const bool forcedFault = false;
-#endif
-                        if (forcedFault || !string.Equals(actualValue, op.Value, StringComparison.Ordinal))
+                        if (!TryParseHandle(op.Target.Handle, out var handle) ||
+                            !document.Database.TryGetObjectId(handle, out var objectId))
                         {
-                            throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
-                                $"Postcondition mismatch for DBText '{op.Target.Handle}': expected '{op.Value}', got '{actualValue}'.");
+                            throw new PlanExecutionException(ErrorCodes.TargetNotFound,
+                                $"Target handle '{op.Target.Handle}' not found during write phase.");
                         }
 
-                        appliedOperations.Add(new OperationApplyResult(op.OperationId, "APPLIED", previousValue, op.Value));
-                    }
-                    else if (string.Equals(op.Kind, ChangePlanValidator.KindSetBlockAttribute, StringComparison.Ordinal))
-                    {
-                        var block = (BlockReference)transaction.GetObject(objectId, OpenMode.ForRead);
-                        AttributeReference? targetAttr = null;
-
-                        foreach (ObjectId attrId in block.AttributeCollection)
+                        if (string.Equals(op.Kind, ChangePlanValidator.KindSetDbText, StringComparison.Ordinal))
                         {
-                            if (transaction.GetObject(attrId, OpenMode.ForRead) is AttributeReference attr &&
-                                string.Equals(attr.Tag, op.Target.AttributeTag, StringComparison.OrdinalIgnoreCase))
+                            var dbText = (DBText)transaction.GetObject(objectId, OpenMode.ForWrite);
+                            var previousValue = dbText.TextString;
+
+                            writeAttempted = true;
+                            touchedSnapshots.Add(snapshot);
+
+                            dbText.TextString = op.Value;
+
+                            // 13. Re-read actual value INSIDE THE SAME TRANSACTION
+                            var actualValue = dbText.TextString;
+
+                            // 14. Validate postcondition: actual == requested value (exact ordinal string)
+#if DEBUG
+                            var forcedFault = string.Equals(op.FaultInjection, "force_postcondition_mismatch", StringComparison.Ordinal);
+#else
+                            const bool forcedFault = false;
+#endif
+                            if (forcedFault || !string.Equals(actualValue, op.Value, StringComparison.Ordinal))
                             {
-                                targetAttr = (AttributeReference)transaction.GetObject(attrId, OpenMode.ForWrite);
-                                break;
+                                throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
+                                    $"Postcondition mismatch for DBText '{op.Target.Handle}': expected '{op.Value}', got '{actualValue}'.");
                             }
-                        }
 
-                        if (targetAttr is null)
+                            appliedOperations.Add(new OperationApplyResult(op.OperationId, "APPLIED", previousValue, op.Value));
+                        }
+                        else if (string.Equals(op.Kind, ChangePlanValidator.KindSetBlockAttribute, StringComparison.Ordinal))
+                        {
+                            var block = (BlockReference)transaction.GetObject(objectId, OpenMode.ForRead);
+                            AttributeReference? targetAttr = null;
+
+                            foreach (ObjectId attrId in block.AttributeCollection)
+                            {
+                                if (transaction.GetObject(attrId, OpenMode.ForRead) is AttributeReference attr &&
+                                    string.Equals(attr.Tag, op.Target.AttributeTag, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    targetAttr = (AttributeReference)transaction.GetObject(attrId, OpenMode.ForWrite);
+                                    break;
+                                }
+                            }
+
+                            if (targetAttr is null)
+                            {
+                                throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
+                                    $"Target attribute '{op.Target.AttributeTag}' missing during write phase.");
+                            }
+
+                            var previousValue = targetAttr.TextString;
+
+                            writeAttempted = true;
+                            touchedSnapshots.Add(snapshot);
+
+                            targetAttr.TextString = op.Value;
+
+                            // 13. Re-read actual value INSIDE THE SAME TRANSACTION
+                            var actualValue = targetAttr.TextString;
+
+                            // 14. Validate postcondition: actual == requested value (exact ordinal string)
+#if DEBUG
+                            var forcedFault = string.Equals(op.FaultInjection, "force_postcondition_mismatch", StringComparison.Ordinal);
+#else
+                            const bool forcedFault = false;
+#endif
+                            if (forcedFault || !string.Equals(actualValue, op.Value, StringComparison.Ordinal))
+                            {
+                                throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
+                                    $"Postcondition mismatch for attribute '{op.Target.AttributeTag}' on block '{op.Target.Handle}': expected '{op.Value}', got '{actualValue}'.");
+                            }
+
+                            appliedOperations.Add(new OperationApplyResult(op.OperationId, "APPLIED", previousValue, op.Value));
+                        }
+                    }
+                    else
+                    {
+                        // Creation primitive operation
+                        writeAttempted = true;
+                        var entity = EntityCreator.CreateEntity(op, document.Database, transaction, modelSpace);
+                        var createdHandle = entity.Handle.ToString();
+                        createdHandles.Add(createdHandle);
+
+                        // Postcondition verification inside the same transaction
+                        if (entity.IsErased || entity.Database != document.Database)
                         {
                             throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
-                                $"Target attribute '{op.Target.AttributeTag}' missing during write phase.");
+                                $"Created entity for operation '{op.OperationId}' failed to attach to active database.");
                         }
 
-                        var previousValue = targetAttr.TextString;
+                        if (entity is DBText createdText && !string.Equals(createdText.TextString, op.Text, StringComparison.Ordinal))
+                        {
+                            throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
+                                $"Postcondition mismatch for created DBText '{op.OperationId}': expected '{op.Text}', got '{createdText.TextString}'.");
+                        }
+                        else if (entity is Circle createdCircle && Math.Abs(createdCircle.Radius - op.Radius!.Value) > 1e-6)
+                        {
+                            throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
+                                $"Postcondition mismatch for created Circle '{op.OperationId}': expected radius {op.Radius}, got {createdCircle.Radius}.");
+                        }
+                        else if (entity is Polyline createdPoly && createdPoly.Closed != (op.Closed == true))
+                        {
+                            throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
+                                $"Postcondition mismatch for created Polyline '{op.OperationId}': expected closed={op.Closed}, got {createdPoly.Closed}.");
+                        }
 
-                        writeAttempted = true;
-                        touchedSnapshots.Add(snapshot);
-
-                        targetAttr.TextString = op.Value;
-
-                        // 13. Re-read actual value INSIDE THE SAME TRANSACTION
-                        var actualValue = targetAttr.TextString;
-
-                        // 14. Validate postcondition: actual == requested value (exact ordinal string)
 #if DEBUG
                         var forcedFault = string.Equals(op.FaultInjection, "force_postcondition_mismatch", StringComparison.Ordinal);
-#else
-                        const bool forcedFault = false;
-#endif
-                        if (forcedFault || !string.Equals(actualValue, op.Value, StringComparison.Ordinal))
+                        if (forcedFault)
                         {
                             throw new PlanExecutionException(ErrorCodes.PostconditionFailed,
-                                $"Postcondition mismatch for attribute '{op.Target.AttributeTag}' on block '{op.Target.Handle}': expected '{op.Value}', got '{actualValue}'.");
+                                $"Forced postcondition mismatch in operation '{op.OperationId}'.");
                         }
+#endif
 
-                        appliedOperations.Add(new OperationApplyResult(op.OperationId, "APPLIED", previousValue, op.Value));
+                        var readbackProps = new Dictionary<string, object?>
+                        {
+                            ["handle"] = createdHandle,
+                            ["entityType"] = entity.GetType().Name
+                        };
+                        appliedOperations.Add(new OperationApplyResult(
+                            op.OperationId, "CREATED", Handle: createdHandle, EntityType: entity.GetType().Name, Properties: readbackProps));
                     }
                 }
 
@@ -226,7 +291,7 @@ internal static class PlanExecutor
                 }
 
                 // Fresh read-only transaction to verify rollback
-                var rollbackSuccess = VerifyRollback(document, touchedSnapshots);
+                var rollbackSuccess = VerifyRollback(document, touchedSnapshots, createdHandles);
 
                 string finalErrorCode;
                 string finalMessage;
@@ -260,13 +325,15 @@ internal static class PlanExecutor
         return RpcResponse.Failure(requestId, errorCode, message, result);
     }
 
-    private static bool VerifyRollback(Document document, IReadOnlyList<TargetSnapshot> snapshots)
+    private static bool VerifyRollback(Document document, IReadOnlyList<TargetSnapshot> snapshots, IReadOnlyList<string> createdHandles)
     {
         try
         {
             using var verifyTx = document.TransactionManager.StartOpenCloseTransaction();
             foreach (var snap in snapshots)
             {
+                if (string.IsNullOrEmpty(snap.Handle)) continue;
+
                 if (!TryParseHandle(snap.Handle, out var handle) ||
                     !document.Database.TryGetObjectId(handle, out var objectId))
                 {
@@ -298,6 +365,19 @@ internal static class PlanExecutor
                         return false;
                 }
             }
+
+            foreach (var handleStr in createdHandles)
+            {
+                if (TryParseHandle(handleStr, out var h) &&
+                    document.Database.TryGetObjectId(h, out var objId))
+                {
+                    if (!objId.IsNull && !objId.IsErased)
+                    {
+                        return false;
+                    }
+                }
+            }
+
             return true;
         }
         catch
@@ -354,6 +434,79 @@ internal static class PlanExecutor
 
         foreach (var op in plan.Operations)
         {
+            if (op.Target is null)
+            {
+                // Creation primitive preflight validation
+                if (!string.IsNullOrWhiteSpace(op.Layer))
+                {
+                    var layerTable = (LayerTable)transaction.GetObject(document.Database.LayerTableId, OpenMode.ForRead);
+                    if (!layerTable.Has(op.Layer))
+                    {
+                        topErrorCode ??= ErrorCodes.UnknownLayer;
+                        topErrorMessage ??= $"Layer '{op.Layer}' does not exist in active drawing.";
+                        operationResults.Add(new OperationValidationResult(
+                            op.OperationId, ErrorCodes.UnknownLayer, Message: $"Layer '{op.Layer}' does not exist in active drawing."));
+                        continue;
+                    }
+                }
+
+                if (string.Equals(op.Kind, ChangePlanValidator.KindInsertBlock, StringComparison.Ordinal))
+                {
+                    var blockTable = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+                    if (!blockTable.Has(op.BlockName))
+                    {
+                        topErrorCode ??= ErrorCodes.UnknownBlock;
+                        topErrorMessage ??= $"Block '{op.BlockName}' does not exist in active drawing.";
+                        operationResults.Add(new OperationValidationResult(
+                            op.OperationId, ErrorCodes.UnknownBlock, Message: $"Block '{op.BlockName}' does not exist in active drawing."));
+                        continue;
+                    }
+
+                    var btrId = blockTable[op.BlockName];
+                    var btr = (BlockTableRecord)transaction.GetObject(btrId, OpenMode.ForRead);
+                    if (btr.IsLayout || btr.IsAnonymous)
+                    {
+                        topErrorCode ??= ErrorCodes.UnknownBlock;
+                        topErrorMessage ??= $"Block '{op.BlockName}' is not an insertable block definition.";
+                        operationResults.Add(new OperationValidationResult(
+                            op.OperationId, ErrorCodes.UnknownBlock, Message: $"Block '{op.BlockName}' is not insertable."));
+                        continue;
+                    }
+
+                    if (op.Attributes is not null && op.Attributes.Count > 0)
+                    {
+                        var existingTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (ObjectId id in btr)
+                        {
+                            if (transaction.GetObject(id, OpenMode.ForRead) is AttributeDefinition attDef)
+                                existingTags.Add(attDef.Tag);
+                        }
+
+                        string? missingTag = null;
+                        foreach (var tag in op.Attributes.Keys)
+                        {
+                            if (!existingTags.Contains(tag))
+                            {
+                                missingTag = tag;
+                                break;
+                            }
+                        }
+
+                        if (missingTag is not null)
+                        {
+                            topErrorCode ??= ErrorCodes.UnknownAttribute;
+                            topErrorMessage ??= $"Attribute tag '{missingTag}' does not exist on block definition '{op.BlockName}'.";
+                            operationResults.Add(new OperationValidationResult(
+                                op.OperationId, ErrorCodes.UnknownAttribute, Message: $"Attribute tag '{missingTag}' does not exist on block '{op.BlockName}'."));
+                            continue;
+                        }
+                    }
+                }
+
+                operationResults.Add(new OperationValidationResult(op.OperationId, "VALID"));
+                continue;
+            }
+
             if (!TryParseHandle(op.Target.Handle, out var handle) ||
                 !document.Database.TryGetObjectId(handle, out var objectId) ||
                 objectId.IsNull || objectId.IsErased)
@@ -388,10 +541,10 @@ internal static class PlanExecutor
 
                 var current = dbText.TextString;
                 // Exact ordinal comparison, no trimming or whitespace folding
-                if (!string.Equals(current, op.Precondition.Equals, StringComparison.Ordinal))
+                if (!string.Equals(current, op.Precondition!.Equals, StringComparison.Ordinal))
                 {
                     topErrorCode ??= ErrorCodes.PreconditionFailed;
-                    topErrorMessage ??= $"Precondition failed for DBText '{op.Target.Handle}': expected '{op.Precondition.Equals}', actual is '{current}'.";
+                    topErrorMessage ??= $"Precondition failed for DBText '{op.Target!.Handle}': expected '{op.Precondition.Equals}', actual is '{current}'.";
                     operationResults.Add(new OperationValidationResult(
                         op.OperationId, ErrorCodes.PreconditionFailed, CurrentValue: current, NewValue: op.Value,
                         Message: $"Precondition mismatch: expected '{op.Precondition.Equals}', found '{current}'."));
@@ -406,7 +559,7 @@ internal static class PlanExecutor
                 if (entity is not BlockReference block)
                 {
                     topErrorCode ??= ErrorCodes.EntityTypeMismatch;
-                    topErrorMessage ??= $"Target '{op.Target.Handle}' is {entity.GetType().Name}, expected BlockReference.";
+                    topErrorMessage ??= $"Target '{op.Target!.Handle}' is {entity.GetType().Name}, expected BlockReference.";
                     operationResults.Add(new OperationValidationResult(
                         op.OperationId, ErrorCodes.EntityTypeMismatch, Message: $"Expected BlockReference, found {entity.GetType().Name}."));
                     continue;
@@ -416,7 +569,7 @@ internal static class PlanExecutor
                 foreach (ObjectId attrId in block.AttributeCollection)
                 {
                     if (transaction.GetObject(attrId, OpenMode.ForRead) is AttributeReference attr &&
-                        string.Equals(attr.Tag, op.Target.AttributeTag, StringComparison.OrdinalIgnoreCase))
+                        string.Equals(attr.Tag, op.Target!.AttributeTag, StringComparison.OrdinalIgnoreCase))
                     {
                         targetAttr = attr;
                         break;
@@ -426,7 +579,7 @@ internal static class PlanExecutor
                 if (targetAttr is null)
                 {
                     topErrorCode ??= ErrorCodes.PreconditionFailed;
-                    topErrorMessage ??= $"Block '{op.Target.Handle}' has no attribute with tag '{op.Target.AttributeTag}'.";
+                    topErrorMessage ??= $"Block '{op.Target!.Handle}' has no attribute with tag '{op.Target.AttributeTag}'.";
                     operationResults.Add(new OperationValidationResult(
                         op.OperationId, ErrorCodes.PreconditionFailed, CurrentValue: null, NewValue: op.Value,
                         Message: $"Attribute tag '{op.Target.AttributeTag}' does not exist on block."));
@@ -435,10 +588,10 @@ internal static class PlanExecutor
 
                 var current = targetAttr.TextString;
                 // Exact ordinal comparison
-                if (!string.Equals(current, op.Precondition.Equals, StringComparison.Ordinal))
+                if (!string.Equals(current, op.Precondition!.Equals, StringComparison.Ordinal))
                 {
                     topErrorCode ??= ErrorCodes.PreconditionFailed;
-                    topErrorMessage ??= $"Precondition failed for attribute '{op.Target.AttributeTag}' on block '{op.Target.Handle}': expected '{op.Precondition.Equals}', actual is '{current}'.";
+                    topErrorMessage ??= $"Precondition failed for attribute '{op.Target!.AttributeTag}' on block '{op.Target.Handle}': expected '{op.Precondition.Equals}', actual is '{current}'.";
                     operationResults.Add(new OperationValidationResult(
                         op.OperationId, ErrorCodes.PreconditionFailed, CurrentValue: current, NewValue: op.Value,
                         Message: $"Precondition mismatch: expected '{op.Precondition.Equals}', found '{current}'."));

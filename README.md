@@ -24,11 +24,19 @@ The public method allowlist is:
 AutoCAD `ObjectId` values never cross the boundary; stable hexadecimal handles are
 returned.
 
-### Safe mutation V1 invariants:
-- **Allowlisted mutations only**: `set_dbtext` (`DBText.TextString`) and `set_block_attribute` (`AttributeReference.TextString`).
-- **Inspect-only in V1**: `MText` and `MLeader` (formatting and content-type risk deferred to V2).
-- **Exact preconditions**: Required string comparison; missing attribute tag fails closed.
-- **Atomic flow**: Full preflight read -> DocumentLock -> Single transaction -> Apply -> Verify postcondition inside transaction -> Commit/Abort.
+### Safe mutation and creation invariants:
+- **Allowlisted mutations**: `set_dbtext` (`DBText.TextString`) and `set_block_attribute` (`AttributeReference.TextString`).
+- **Typed 2D creation primitives**:
+  - `create_line`: `start` and `end` points.
+  - `create_polyline`: vertex `points` list, `closed` boolean.
+  - `create_circle`: `center` point, `radius` (>0).
+  - `create_arc`: `center` point, `radius` (>0), `startAngle` and `endAngle` in radians.
+  - `create_dbtext`: `text`, `position`, `height`, `rotation`, optional `horizontalAlignment` and `verticalAlignment`.
+  - `create_mtext`: `text`, `position`, `textHeight`, `width`, `rotation`.
+  - `insert_block`: `blockName`, `position`, `rotation`, `scale`, optional `attributes`.
+- **Inspect-only in V1**: `MLeader` (and existing `MText` modification deferred).
+- **Exact preconditions & dry-run**: Required string comparison for mutations; layer and block definitions verified ForRead before any write.
+- **Atomic flow**: Full preflight read -> DocumentLock -> Single transaction -> Apply / Create -> Verify postconditions inside transaction -> Commit/Abort.
 - **Zero auto-save**: The plugin never executes Save, SaveAs, or command-line save. After apply, the DWG is marked modified (`*`) and the operator decides when to save.
 
 

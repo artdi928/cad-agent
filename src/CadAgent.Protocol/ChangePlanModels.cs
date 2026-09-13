@@ -10,12 +10,42 @@ public sealed record ChangePlan(
 public sealed record DrawingTarget(
     string FullPath);
 
+public sealed record PointDto(
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y,
+    [property: JsonPropertyName("z")] double Z = 0.0);
+
+public sealed record ScaleDto(
+    [property: JsonPropertyName("x")] double X = 1.0,
+    [property: JsonPropertyName("y")] double Y = 1.0,
+    [property: JsonPropertyName("z")] double Z = 1.0);
+
 public sealed record PlanOperation(
     string OperationId,
     string Kind,
-    OperationTarget Target,
-    Precondition Precondition,
-    string Value
+    OperationTarget? Target = null,
+    Precondition? Precondition = null,
+    string? Value = null,
+    string? Layer = null,
+    PointDto? Start = null,
+    PointDto? End = null,
+    IReadOnlyList<PointDto>? Points = null,
+    bool? Closed = null,
+    PointDto? Center = null,
+    double? Radius = null,
+    double? StartAngle = null,
+    double? EndAngle = null,
+    string? Text = null,
+    PointDto? Position = null,
+    double? Height = null,
+    double? TextHeight = null,
+    double? Width = null,
+    double? Rotation = null,
+    string? HorizontalAlignment = null,
+    string? VerticalAlignment = null,
+    string? BlockName = null,
+    ScaleDto? Scale = null,
+    IReadOnlyDictionary<string, string>? Attributes = null
 #if DEBUG
     , [property: JsonPropertyName("faultInjection")]
     string? FaultInjection = null
@@ -63,5 +93,8 @@ public sealed record PlanApplyResult(
 public sealed record OperationApplyResult(
     string OperationId,
     string Status,
-    string PreviousValue,
-    string NewValue);
+    string? PreviousValue = null,
+    string? NewValue = null,
+    string? Handle = null,
+    string? EntityType = null,
+    IReadOnlyDictionary<string, object?>? Properties = null);

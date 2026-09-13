@@ -67,7 +67,7 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
         ),
         new(
             "cad_list_entities",
-            "Inspect and list entities in ModelSpace and PaperSpace. Supported types: DBText, BlockReference, MText, MLeader. Optionally filter by entity types.",
+            "Inspect and list entities in ModelSpace and PaperSpace. Supported types: Line, Polyline, Circle, Arc, DBText, BlockReference, MText, MLeader. Optionally filter by entity types.",
             JsonDocument.Parse("""
             {
               "type": "object",
@@ -75,7 +75,7 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
                 "types": {
                   "type": "array",
                   "items": { "type": "string" },
-                  "description": "Optional filter of entity type names, e.g. ['DBText', 'BlockReference']."
+                  "description": "Optional filter of entity type names, e.g. ['Line', 'Polyline', 'Circle', 'Arc', 'DBText', 'BlockReference']."
                 }
               },
               "additionalProperties": false
@@ -84,7 +84,7 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
         ),
         new(
             "cad_validate_change_plan",
-            "Perform dry-run preflight validation of a structured change plan against the active drawing. Validates active drawing identity, entity handles, object types, and precondition values ForRead before any write is attempted.",
+            "Perform dry-run preflight validation of a structured change plan against the active drawing. Validates active drawing identity, entity handles, object types, precondition values, and 2D geometry creation primitives ForRead before any write is attempted.",
             JsonDocument.Parse("""
             {
               "type": "object",
@@ -107,7 +107,15 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
                         "type": "object",
                         "properties": {
                           "operationId": { "type": "string" },
-                          "kind": { "type": "string", "enum": ["set_dbtext", "set_block_attribute"] },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "set_dbtext", "set_block_attribute",
+                              "create_line", "create_polyline", "create_circle", "create_arc",
+                              "create_dbtext", "create_mtext", "insert_block"
+                            ]
+                          },
+                          "layer": { "type": "string" },
                           "target": {
                             "type": "object",
                             "properties": {
@@ -123,9 +131,28 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
                             },
                             "required": ["equals"]
                           },
-                          "value": { "type": "string" }
+                          "value": { "type": "string" },
+                          "start": { "type": "object" },
+                          "end": { "type": "object" },
+                          "points": { "type": "array" },
+                          "closed": { "type": "boolean" },
+                          "center": { "type": "object" },
+                          "radius": { "type": "number" },
+                          "startAngle": { "type": "number" },
+                          "endAngle": { "type": "number" },
+                          "text": { "type": "string" },
+                          "position": { "type": "object" },
+                          "height": { "type": "number" },
+                          "textHeight": { "type": "number" },
+                          "width": { "type": "number" },
+                          "rotation": { "type": "number" },
+                          "horizontalAlignment": { "type": "string" },
+                          "verticalAlignment": { "type": "string" },
+                          "blockName": { "type": "string" },
+                          "scale": { "type": "object" },
+                          "attributes": { "type": "object" }
                         },
-                        "required": ["operationId", "kind", "target", "precondition", "value"]
+                        "required": ["operationId", "kind"]
                       }
                     }
                   },
@@ -162,7 +189,15 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
                         "type": "object",
                         "properties": {
                           "operationId": { "type": "string" },
-                          "kind": { "type": "string", "enum": ["set_dbtext", "set_block_attribute"] },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "set_dbtext", "set_block_attribute",
+                              "create_line", "create_polyline", "create_circle", "create_arc",
+                              "create_dbtext", "create_mtext", "insert_block"
+                            ]
+                          },
+                          "layer": { "type": "string" },
                           "target": {
                             "type": "object",
                             "properties": {
@@ -178,9 +213,28 @@ public sealed class McpToolHandler(ICadBridgeClient bridgeClient)
                             },
                             "required": ["equals"]
                           },
-                          "value": { "type": "string" }
+                          "value": { "type": "string" },
+                          "start": { "type": "object" },
+                          "end": { "type": "object" },
+                          "points": { "type": "array" },
+                          "closed": { "type": "boolean" },
+                          "center": { "type": "object" },
+                          "radius": { "type": "number" },
+                          "startAngle": { "type": "number" },
+                          "endAngle": { "type": "number" },
+                          "text": { "type": "string" },
+                          "position": { "type": "object" },
+                          "height": { "type": "number" },
+                          "textHeight": { "type": "number" },
+                          "width": { "type": "number" },
+                          "rotation": { "type": "number" },
+                          "horizontalAlignment": { "type": "string" },
+                          "verticalAlignment": { "type": "string" },
+                          "blockName": { "type": "string" },
+                          "scale": { "type": "object" },
+                          "attributes": { "type": "object" }
                         },
-                        "required": ["operationId", "kind", "target", "precondition", "value"]
+                        "required": ["operationId", "kind"]
                       }
                     }
                   },

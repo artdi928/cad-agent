@@ -36,6 +36,9 @@ public static class ErrorCodes
     public const string CadError = "CAD_ERROR";
     public const string PostconditionFailed = "POSTCONDITION_FAILED";
     public const string AtomicityViolation = "ATOMICITY_VIOLATION";
+    public const string UnknownLayer = "UNKNOWN_LAYER";
+    public const string UnknownBlock = "UNKNOWN_BLOCK";
+    public const string UnknownAttribute = "UNKNOWN_ATTRIBUTE";
 }
 
 public sealed record RpcRequest(int Version, string RequestId, string Method, JsonElement? Parameters = null);

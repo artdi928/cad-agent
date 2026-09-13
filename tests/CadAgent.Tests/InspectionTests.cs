@@ -127,4 +127,128 @@ public sealed class InspectionTests
                 $"EntityDto property '{prop.Name}' has type '{prop.PropertyType.Name}' referencing ObjectId.");
         }
     }
+
+    [TestMethod]
+    public void LineDto_SerializesStartAndEnd()
+    {
+        var dto = new EntityDto(
+            Handle: "6F",
+            EntityType: "Line",
+            Layer: "0",
+            Space: "model",
+            Layout: "Model",
+            Start: new PositionDto(0, 0, 0),
+            End: new PositionDto(1000, 500, 0));
+
+        var json = JsonSerializer.Serialize(dto, JsonDefaults.Options);
+        Assert.IsTrue(json.Contains("\"entityType\":\"Line\""));
+        Assert.IsTrue(json.Contains("\"start\":{\"x\":0,\"y\":0,\"z\":0}"));
+        Assert.IsTrue(json.Contains("\"end\":{\"x\":1000,\"y\":500,\"z\":0}"));
+
+        var roundTripped = JsonSerializer.Deserialize<EntityDto>(json, JsonDefaults.Options);
+        Assert.IsNotNull(roundTripped);
+        Assert.AreEqual(0.0, roundTripped.Start!.X);
+        Assert.AreEqual(1000.0, roundTripped.End!.X);
+    }
+
+    [TestMethod]
+    public void PolylineDto_SerializesVerticesAndClosed()
+    {
+        var vertices = new List<PositionDto>
+        {
+            new(0, 0, 0),
+            new(1000, 0, 0),
+            new(1000, 500, 0),
+            new(0, 500, 0)
+        };
+
+        var dto = new EntityDto(
+            Handle: "7A",
+            EntityType: "Polyline",
+            Layer: "0",
+            Space: "model",
+            Layout: "Model",
+            Vertices: vertices,
+            Closed: true);
+
+        var json = JsonSerializer.Serialize(dto, JsonDefaults.Options);
+        Assert.IsTrue(json.Contains("\"entityType\":\"Polyline\""));
+        Assert.IsTrue(json.Contains("\"closed\":true"));
+        Assert.IsTrue(json.Contains("\"vertices\":["));
+
+        var roundTripped = JsonSerializer.Deserialize<EntityDto>(json, JsonDefaults.Options);
+        Assert.IsNotNull(roundTripped);
+        Assert.IsTrue(roundTripped.Closed == true);
+        Assert.AreEqual(4, roundTripped.Vertices!.Count);
+    }
+
+    [TestMethod]
+    public void CircleDto_SerializesCenterAndRadius()
+    {
+        var dto = new EntityDto(
+            Handle: "8B",
+            EntityType: "Circle",
+            Layer: "0",
+            Space: "model",
+            Layout: "Model",
+            Center: new PositionDto(2500, 250, 0),
+            Radius: 500.0);
+
+        var json = JsonSerializer.Serialize(dto, JsonDefaults.Options);
+        Assert.IsTrue(json.Contains("\"entityType\":\"Circle\""));
+        Assert.IsTrue(json.Contains("\"center\":{\"x\":2500,\"y\":250,\"z\":0}"));
+        Assert.IsTrue(json.Contains("\"radius\":500"));
+
+        var roundTripped = JsonSerializer.Deserialize<EntityDto>(json, JsonDefaults.Options);
+        Assert.IsNotNull(roundTripped);
+        Assert.AreEqual(500.0, roundTripped.Radius);
+        Assert.AreEqual(2500.0, roundTripped.Center!.X);
+    }
+
+    [TestMethod]
+    public void ArcDto_SerializesCenterRadiusAndAngles()
+    {
+        var dto = new EntityDto(
+            Handle: "9C",
+            EntityType: "Arc",
+            Layer: "0",
+            Space: "model",
+            Layout: "Model",
+            Center: new PositionDto(0, 0, 0),
+            Radius: 300.0,
+            StartAngle: 0.0,
+            EndAngle: Math.PI);
+
+        var json = JsonSerializer.Serialize(dto, JsonDefaults.Options);
+        Assert.IsTrue(json.Contains("\"entityType\":\"Arc\""));
+        Assert.IsTrue(json.Contains("\"radius\":300"));
+        Assert.IsTrue(json.Contains("\"startAngle\":0"));
+
+        var roundTripped = JsonSerializer.Deserialize<EntityDto>(json, JsonDefaults.Options);
+        Assert.IsNotNull(roundTripped);
+        Assert.AreEqual(300.0, roundTripped.Radius);
+        Assert.AreEqual(Math.PI, roundTripped.EndAngle!.Value, 1e-6);
+    }
+
+    [TestMethod]
+    public void DBTextDto_WithAlignment_SerializesAnchorHeightRotation()
+    {
+        var dto = new EntityDto(
+            Handle: "10D",
+            EntityType: "DBText",
+            Layer: "0",
+            Space: "model",
+            Layout: "Model",
+            Position: new PositionDto(2500, 250, 0),
+            Anchor: new PositionDto(2500, 250, 0),
+            Height: 200.0,
+            Rotation: 0.0,
+            Alignment: "TextCenter/TextVerticalMid",
+            Text: "КРУГ");
+
+        var json = JsonSerializer.Serialize(dto, JsonDefaults.Options);
+        Assert.IsTrue(json.Contains("\"alignment\":\"TextCenter/TextVerticalMid\""));
+        Assert.IsTrue(json.Contains("\"height\":200"));
+        Assert.IsTrue(json.Contains("\"anchor\":{\"x\":2500,\"y\":250,\"z\":0}"));
+    }
 }

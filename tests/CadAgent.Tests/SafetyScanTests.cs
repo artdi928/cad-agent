@@ -93,6 +93,22 @@ public sealed class SafetyScanTests
     }
 
     [TestMethod]
+    public void MLeader_RemainsInspectOnly_AcrossEntireCodebase()
+    {
+        var repoRoot = GetRepoRoot();
+        var srcDir = Path.Combine(repoRoot, "src");
+        var csFiles = Directory.GetFiles(srcDir, "*.cs", SearchOption.AllDirectories);
+
+        foreach (var file in csFiles)
+        {
+            var content = File.ReadAllText(file);
+            Assert.IsFalse(content.Contains("mLeader.Text =") || content.Contains("mLeader.MText =") ||
+                           content.Contains("MLeader.Text ="),
+                $"MLeader must remain inspect-only in v1: found modification in '{Path.GetFileName(file)}'.");
+        }
+    }
+
+    [TestMethod]
     public void McpProject_DoesNotReferenceAutodeskAssemblies()
     {
         var repoRoot = GetRepoRoot();
